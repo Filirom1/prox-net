@@ -1,13 +1,14 @@
-package transocks
+package main
 
 import (
+	"fmt"
 	"net"
 	"strings"
 
 	"github.com/jackwakefield/gopac"
 )
 
-var ppac gopac.Parser
+var ppac *gopac.Parser
 
 func init() {
 	ppac = new(gopac.Parser)
@@ -19,22 +20,29 @@ func init() {
 func DialViaProxyPAC(addr string) (c net.Conn, err error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return niol, err
+		return nil, err
 	}
+	fmt.Println(addr)
+
+	fmt.Println(host)
 
 	// find the proxy entry for host check.immun.es
-	entry, err := s.ppac.FindProxy("", host)
-
+	entry, err := ppac.FindProxy(addr, host)
+	fmt.Println(entry)
 	if err != nil {
 		return nil, err
 	}
 
-	arr := strings.Split(entry, " ")
-	verb, proxy_url := arr[0], arr[1]
-
-	if verb == "PROXY" {
-		return DialConnect(addr, proxy_url)
-	} else if verb == "DIRECT" {
+	if entry == "DIRECT" {
 		return DialDirect(addr)
+	} else {
+		arr := strings.Split(entry, " ")
+		verb, proxy_url := arr[0], arr[1]
+
+		if verb == "PROXY" {
+			return DialConnect(addr, proxy_url)
+		}
+		return nil, nil
 	}
+
 }

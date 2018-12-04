@@ -9,11 +9,10 @@ import (
 	"strconv"
 	"syscall"
 	"unsafe"
-  "strings"
+
 	"github.com/hashicorp/golang-lru"
 	"github.com/williamfhe/godivert"
 	"golang.org/x/sys/windows"
-  "github.com/inconshreveable/go-vhost"
 )
 
 const (
@@ -25,6 +24,7 @@ var tcpConnections map[Addr]int
 var getExtendedTcpTablePtr uintptr
 var winDivertReq godivert.WinDivertHandle
 var winDivertResp godivert.WinDivertHandle
+var winDivertDNS godivert.WinDivertHandle
 
 type Conn struct {
 	local       *Addr
@@ -175,13 +175,12 @@ func redirectRequest(winDivert *godivert.WinDivertHandle, packetChan <-chan *god
 		packet.Send(winDivert)
 	}
 }
-
 func redirectResponse(winDivert *godivert.WinDivertHandle, packetChan <-chan *godivert.Packet) {
 
-  for packet := range packetChan {
+	for packet := range packetChan {
 
 		dstPort, err := packet.DstPort()
-    if err != nil {
+		if err != nil {
 			log.Printf("Should not happen, no dst port: %v", err)
 			continue
 		}
@@ -203,6 +202,20 @@ func redirectResponse(winDivert *godivert.WinDivertHandle, packetChan <-chan *go
 		packet.SetDstIP(net.ParseIP(conn.local.ip))
 		packet.Addr = conn.divert_addr
 
+		packet.Send(winDivert)
+	}
+}
+
+func redirectDNS(winDivert *godivert.WinDivertHandle, packetChan <-chan *godivert.Packet) {
+	for packet := range packetChan {
+		srcPort, _ := packet.SrcPort()
+		if srcPort == 53 {
+			packet.SetSrcIP(net.IPv4(192, 168, 1, 254))
+		} else {
+			packet.SetDstIP(net.IPv4(8, 8, 8, 8))
+
+		}
+		//fmt.Println(packet)
 		packet.Send(winDivert)
 	}
 }
@@ -235,56 +248,8 @@ func GetOriginalDST(c net.Conn) (*net.TCPAddr, error) {
 	return addr, nil
 }
 
-func forward(conn net.Conn) {
-	dst, err := GetOriginalDST(conn)
-	if err != nil {
-		log.Printf("No Original Destination found for %v", conn)
-	}
-	dstIp := dst.IP.String()
-	dstPort := strconv.Itoa(dst.Port)
-
-	var u string
-	if strings.Contains(dstIp, ":") {
-		u = "[" + dstIp + "]:" + dstPort
-	} else {
-		u = dstIp + ":" + dstPort
-	}
-
-	var newConn net.Conn
-	var proto string
-	vhostConn, err := vhost.HTTP(conn)
-	newConn = vhostConn
-	if err != nil {
-		vhostConnTLS, err := vhost.TLS(vhostConn)
-		newConn = vhostConnTLS
-		if err != nil {
-			proto = "?"
-		} else {
-			proto = "https " + vhostConnTLS.Host()
-		}
-	} else {
-		proto = "http " + vhostConn.Host()
-	}
-	fmt.Println(dstIp + " " + dstPort + " " + proto)
-
-	client, err := DialViaProxyPAC(u, newConn)
-  if err != nil {
-    log.Fatalf("Dial failed: %v", err)
-  }
-  go func() {
-    defer client.Close()
-    defer conn.Close()
-    io.Copy(client, conn)
-  }()
-  go func() {
-    defer client.Close()
-    defer conn.Close()
-    io.Copy(conn, client)
-  }()
-}
-
 func StartNAT() {
-  moduleHandle, err := windows.LoadLibrary("iphlpapi.dll")
+	moduleHandle, err := windows.LoadLibrary("iphlpapi.dll")
 	if err != nil {
 		panic(err)
 	}
@@ -316,10 +281,22 @@ func StartNAT() {
 	}
 
 	go redirectResponse(winDivertResp, packetChanResp)
-  Listen()
+
+	winDivertDNS, err := godivert.NewWinDivertHandle("udp.DstPort == 53 or udp.SrcPort == 53")
+	if err != nil {
+		panic(err)
+	}
+	packetChanDNS, err := winDivertDNS.Packets()
+	if err != nil {
+		panic(err)
+	}
+
+	go redirectDNS(winDivertDNS, packetChanDNS)
+	Listen()
 }
 
-func EndNAT(){
-  defer winDivertReq.Close()
-  defer winDivertResp.Close()
+func EndNAT() {
+	defer winDivertReq.Close()
+	defer winDivertResp.Close()
+	defer winDivertDNS.Close()
 }

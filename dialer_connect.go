@@ -6,7 +6,7 @@
 // The dialer requests an upstream HTTP proxy to create a TCP tunnel
 // by CONNECT method.
 
-package transocks
+package main
 
 import (
 	"bufio"
@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-func DialConnect(network, addr string, proxy string) (c net.Conn, err error) {
+func DialConnect(addr string, proxy string) (c net.Conn, err error) {
 	req := &http.Request{
 		Method: "CONNECT",
 		URL:    &url.URL{Opaque: addr},
