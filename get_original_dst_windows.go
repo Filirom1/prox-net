@@ -11,7 +11,9 @@ import (
 	"unsafe"
 
 	"github.com/hashicorp/golang-lru"
+	"github.com/miekg/dns"
 	"github.com/williamfhe/godivert"
+	"github.com/williamfhe/godivert/header"
 	"golang.org/x/sys/windows"
 )
 
@@ -210,9 +212,29 @@ func redirectDNS(winDivert *godivert.WinDivertHandle, packetChan <-chan *godiver
 	for packet := range packetChan {
 		srcPort, _ := packet.SrcPort()
 		if srcPort == 53 {
-			packet.SetSrcIP(net.IPv4(192, 168, 1, 254))
+			fmt.Println("resp")
+			m := new(dns.Msg)
+			udpHeader, _ := packet.NextHeader.(*header.UDPHeader)
+			dnsData := udpHeader.Raw[udpHeader.HeaderLen():udpHeader.Len()]
+			fmt.Printf("%x\n", dnsData)
+			m.Unpack(dnsData)
+			for _, answer := range m.Answer {
+				a, ok := answer.(*dns.A)
+				if ok {
+					fmt.Println(a.A)
+					a.A = net.IPv4(127, 0, 0, 1)
+				}
+			}
+
+			newDnsData, _ := m.Pack()
+			fmt.Printf("ol len %v, new len %v\n", len(dnsData), len(newDnsData))
+			fmt.Printf("%x\n", newDnsData)
+			newRaw := append(udpHeader.Raw[0:udpHeader.HeaderLen()], newDnsData...)
+			udpHeader.Raw = newRaw
+			packet.CalcNewChecksum(winDivert)
 		} else {
-			packet.SetDstIP(net.IPv4(8, 8, 8, 8))
+			fmt.Println("req")
+			//packet.SetDstIP(net.IPv4(8, 8, 8, 8))
 
 		}
 		//fmt.Println(packet)

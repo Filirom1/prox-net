@@ -15,7 +15,7 @@ func init() {
 		srv := &dns.Server{Addr: "127.0.0.1:53", Net: "udp"}
 		err := srv.ListenAndServe()
 		if err != nil {
-			log.Fatal("Failed to set udp listener %s\n", err.Error())
+			log.Fatalf("Failed to set udp listener %s\n", err.Error())
 		}
 	}()
 }
